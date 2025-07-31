@@ -15,23 +15,19 @@ import {
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import SearchBar from '@/components/SearchBar';
-import {
-  getLocalLevels,
-  insertLocalLevel,
-  updateLocalLevel,
-  deleteLocalLevel,
-  updateLocalLevelSupabaseId,
-  Level,
-  markLevelAsSynced,
-  markRemoteDeletedLocally,
-  updateLocalLevelFieldsBySupabase,
-  insertFromSupabaseIfNotExists,
-  deleteLocalLevelByUuidAndMarkSynced,
-} from '@/lib/levelsDb';
+import { useEnhancedCrud } from '@/hooks/useEnhancedCrud';
+import { levelsRepository, Level } from '@/lib/localDb/levelsRepository';
+import EnhancedDataTable, { Column } from '@/components/EnhancedDataTable';
 import { getUnsyncedChanges, clearSyncedChange } from '@/lib/syncQueueDb';
 import NetInfo from '@react-native-community/netinfo';
+import { ThemedView } from '@/components/ThemedView';
 
 export default function LevelsScreen() {
+  const crud = useEnhancedCrud({
+    repository: levelsRepository,
+    displayName: 'المستوى'
+  });
+
   const [levels, setLevels] = useState<Level[]>([]);
   const [filteredLevels, setFilteredLevels] = useState<Level[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +35,8 @@ export default function LevelsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingItem, setEditingItem] = useState<Level | null>(null);
+  const [newLevelName, setNewLevelName] = useState('');
   const [isConnected, setIsConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -246,6 +244,35 @@ export default function LevelsScreen() {
     }
   }, [searchQuery, levels]);
 
+  const columns: Column<Level>[] = [
+    {
+      key: 'name',
+      title: 'اسم المستوى',
+      render: (item: Level) => item.name
+    }
+  ];
+
+  const actions = [
+    {
+      label: 'تعديل',
+      iconName: 'create-outline' as keyof typeof Ionicons.glyphMap,
+      onPress: (item: Level) => {
+        setEditingItem(item);
+        setNewLevelName(item.name);
+        setModalVisible(true);
+      },
+      style: { backgroundColor: '#eff6ff' },
+      textStyle: { color: '#3b82f6' }
+    },
+    {
+      label: 'حذف',
+      iconName: 'trash-outline' as keyof typeof Ionicons.glyphMap,
+      onPress: (item: Level) => crud.deleteItem(item.id),
+      style: { backgroundColor: '#fef2f2' },
+      textStyle: { color: '#ef4444' }
+    }
+  ];
+
   const handleSave = async () => {
     if (!name.trim()) {
       Alert.alert('خطأ', 'يرجى إدخال اسم المستوى');
@@ -271,6 +298,21 @@ export default function LevelsScreen() {
     } catch (error: any) {
       Alert.alert('خطأ', error.message);
       // لا يتم إغلاق المودال أو إعادة تعيين القيم
+    }
+  };
+
+  const handleSubmit = async () => {
+    try {
+      if (editingItem) {
+        await crud.updateItem(editingItem.id, { name: newLevelName });
+      } else {
+        await crud.createItem({ name: newLevelName });
+      }
+      setModalVisible(false);
+      setEditingItem(null);
+      setNewLevelName('');
+    } catch (error: any) {
+      Alert.alert('خطأ', error.message);
     }
   };
 
@@ -366,7 +408,7 @@ export default function LevelsScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ThemedView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
 
       <View style={styles.header}>
@@ -376,7 +418,7 @@ export default function LevelsScreen() {
           setName('');
           setEditingId(null);
         }}>
-          <Ionicons name="add-circle" size={24} color="white" />
+          <Ionicons name="add-outline" size={24} color="white" />
           <Text style={styles.addButtonText}>مستوى جديد</Text>
         </TouchableOpacity>
       </View>
@@ -401,7 +443,17 @@ export default function LevelsScreen() {
         </View>
       )}
 
-      <SearchBar searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
+      <EnhancedDataTable
+        data={crud.filteredItems}
+        columns={columns}
+        actions={actions}
+        searchQuery={crud.searchQuery}
+        onSearchChange={crud.setSearchQuery}
+        syncStatus={crud.syncStatus}
+        onSync={crud.sync}
+        refreshing={crud.loading}
+        onRefresh={crud.refresh}
+      />
 
       {searchQuery.length > 0 && levels.length > 0 && <ResultsCount />}
 
@@ -454,7 +506,9 @@ export default function LevelsScreen() {
               <TextInput
                 value={name}
                 onChangeText={setName}
-                placeholder="أدخل اسم المستوى"
+                placeholder="اسم المستوى"
+                value={newLevelName}
+                onChangeText={setNewLevelName}
                 style={styles.input}
                 autoFocus
               />
@@ -465,23 +519,26 @@ export default function LevelsScreen() {
                 style={[styles.modalButton, styles.cancelButton]}
                 onPress={() => {
                   setModalVisible(false);
-                  setEditingId(null);
-                  setName('');
+                  setEditingItem(null);
+                  setNewLevelName('');
                 }}
               >
                 <Text style={styles.cancelText}>إلغاء</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
-                onPress={handleSave}
+                onPress={handleSubmit}
+                disabled={!newLevelName.trim()}
               >
-                <Text style={styles.saveText}>{editingId ? 'تحديث' : 'إنشاء'}</Text>
+                <Text style={styles.saveText}>
+                  {editingItem ? 'تحديث' : 'إضافة'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </ThemedView>
   );
 }
 
