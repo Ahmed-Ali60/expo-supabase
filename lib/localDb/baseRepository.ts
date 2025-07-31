@@ -175,3 +175,5 @@ export abstract class BaseRepository<T extends BaseEntity> {
     );
   }
 }
+
+export { BaseRepository }
