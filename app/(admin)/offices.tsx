@@ -15,23 +15,18 @@ import {
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import SearchBar from '@/components/SearchBar';
-import {
-  getLocalOffices,
-  insertLocalOffice,
-  updateLocalOffice,
-  deleteLocalOffice,
-  updateLocalOfficeSupabaseId,
-  Office,
-  markOfficeAsSynced,
-  markRemoteDeletedLocally,
-  updateLocalOfficeFieldsBySupabase,
-  insertFromSupabaseIfNotExists,
-  deleteLocalOfficeByUuidAndMarkSynced,
-} from '@/lib/officesDb';
+import { useEnhancedCrud } from '@/hooks/useEnhancedCrud';
+import { officesRepository, Office } from '@/lib/localDb/officesRepository';
+import EnhancedDataTable, { Column } from '@/components/EnhancedDataTable';
 import { getUnsyncedChanges, clearSyncedChange } from '@/lib/syncQueueDb';
 import NetInfo from '@react-native-community/netinfo';
 
 export default function OfficesScreen() {
+  const crud = useEnhancedCrud({
+    repository: officesRepository,
+    displayName: 'المركز'
+  });
+
   const [offices, setOffices] = useState<Office[]>([]);
   const [filteredOffices, setFilteredOffices] = useState<Office[]>([]);
   const [loading, setLoading] = useState(true);
@@ -246,6 +241,34 @@ export default function OfficesScreen() {
     }
   }, [searchQuery, offices]);
 
+  const columns: Column<Office>[] = [
+    {
+      key: 'name',
+      title: 'اسم المركز',
+      render: (item) => item.name
+    }
+  ];
+
+  const actions = [
+    {
+      label: 'تعديل',
+      iconName: 'create-outline' as keyof typeof Ionicons.glyphMap,
+      onPress: (item: Office) => {
+        setEditingItem(item);
+        setModalVisible(true);
+      },
+      style: { backgroundColor: '#eff6ff' },
+      textStyle: { color: '#3b82f6' }
+    },
+    {
+      label: 'حذف',
+      iconName: 'trash-outline' as keyof typeof Ionicons.glyphMap,
+      onPress: (item: Office) => crud.deleteItem(item.id),
+      style: { backgroundColor: '#fef2f2' },
+      textStyle: { color: '#ef4444' }
+    }
+  ];
+
   const handleSave = async () => {
     if (!name.trim()) {
       Alert.alert('خطأ', 'يرجى إدخال اسم المركز');
@@ -271,6 +294,21 @@ export default function OfficesScreen() {
     } catch (error: any) {
       Alert.alert('خطأ', error.message);
       // لا يتم إغلاق المودال أو إعادة تعيين القيم
+    }
+  };
+
+  const handleSubmit = async () => {
+    try {
+      if (editingItem) {
+        await crud.updateItem(editingItem.id, { name: newOfficeName });
+      } else {
+        await crud.createItem({ name: newOfficeName });
+      }
+      setModalVisible(false);
+      setEditingItem(null);
+      setNewOfficeName('');
+    } catch (error: any) {
+      Alert.alert('خطأ', error.message);
     }
   };
 
@@ -405,21 +443,24 @@ export default function OfficesScreen() {
 
       {searchQuery.length > 0 && offices.length > 0 && <ResultsCount />}
 
-      <FlatList
-        data={filteredOffices}
-        keyExtractor={item => item.uuid || item.id.toString()}
-        refreshing={loading}
-        onRefresh={async () => {
-          await fetchOffices();
-          if (isConnected) {
-            await syncDataWithSupabase();
-          }
-        }}
-        renderItem={renderOfficeItem}
-        ListEmptyComponent={EmptyState}
-        contentContainerStyle={styles.listContent}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+      <EnhancedDataTable
+        data={crud.filteredItems}
+        columns={columns}
+        actions={actions}
+        searchQuery={crud.searchQuery}
+        onSearchChange={crud.setSearchQuery}
+        syncStatus={crud.syncStatus}
+        onSync={crud.sync}
+        refreshing={crud.loading}
+        onRefresh={crud.refresh}
       />
+
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => setModalVisible(true)}
+      >
+        <Ionicons name="add-outline" size={24} color="white" />
+      </TouchableOpacity>
 
       <Modal
         visible={modalVisible}
@@ -454,7 +495,7 @@ export default function OfficesScreen() {
               <TextInput
                 value={name}
                 onChangeText={setName}
-                placeholder="أدخل اسم المركز"
+                placeholder="اسم المركز"
                 style={styles.input}
                 autoFocus
               />
@@ -473,9 +514,12 @@ export default function OfficesScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
-                onPress={handleSave}
+                onPress={handleSubmit}
+                disabled={!newOfficeName.trim()}
               >
-                <Text style={styles.saveText}>{editingId ? 'تحديث' : 'إنشاء'}</Text>
+                <Text style={styles.saveText}>
+                  {editingItem ? 'تحديث' : 'إضافة'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
